@@ -84,7 +84,7 @@ app.get('/edit/:id', (req, res) => {
 
 
   const data = {
-    pageTitle: `Redaguoti knygą "${books.title}"`,
+    pageTitle: `Redaguoti knygą "${book.title}"`,
     domain: domain,
     ...book
   };
