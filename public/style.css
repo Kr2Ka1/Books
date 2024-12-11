@@ -11991,3 +11991,11 @@ body {
 nav {
   background-color: rgb(179, 216, 241);
 }
+
+.big {
+  font-size: 100px;
+}
+
+.mid {
+  font-size: 40px;
+}

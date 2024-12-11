@@ -10,6 +10,8 @@
 </head>
 
 <body>
+    {{#if nomenu}}
+    {{else}}
     <header>
         <nav>
             <ul class="nav">
@@ -18,6 +20,7 @@
             </ul>
         </nav>
     </header>
+    {{/if}}
     {{#if message}}
     <div class="container" data-msg-container>
         <div class="row justify-content-center">
