@@ -5,6 +5,7 @@ const handlebars = require('handlebars');
 const multer = require('multer');
 const fs = require('node:fs');
 const { v4: uuidv4 } = require('uuid');
+const { log } = require('node:console');
 const app = express();
 
 handlebars.registerHelper('isdefined', function (value) {
@@ -33,12 +34,23 @@ const messages = {
   edit_success: { msg: 'Knyga sėkmingai atnaujinta!', type: 'success' },
   delete_success: { msg: 'Knyga sėkmingai ištrinta!', type: 'success' },
   validation_error: { msg: 'Užpildykite visus laukus!', type: 'danger' },
+  file_error: { msg: 'Netinkamas paveikslėlio formatas. Palaikomi formatai: jpeg, png', type: 'danger' }
 };
 
 
 // MIDDLEWARE
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') {
+      cb(null, true);
+    } else {
+      cb(null, false);
+      req.fileValidationError = true;
+    }
+  }
+});
 
 const sessionManager = (req, res, next) => {
   let sessionId = req.cookies.session || '';
@@ -71,8 +83,9 @@ const oldDataManager = (req, res, next) => {
 }
 
 app.use(express.static('public'));
-app.use(bodyParser.urlencoded({ extended: true }));
+// app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(upload.single('cover'));
 
 app.use(sessionManager);
 app.use(oldDataManager);
@@ -244,15 +257,27 @@ app.get('/show/:id', (req, res) => {
 });
 
 
-app.post('/store', upload.single('cover'), (req, res) => {
+app.post('/store', (req, res) => {
   const { title, author, year, genre, isbn, pages } = req.body;
+  const uploadFileName = req.file?.filename; //req.file egzistuoja tik jei yra failas
   const id = uuidv4();
   if (!title || !author || !year || !genre || !isbn || !pages) {
+
+    if (uploadFileName) {
+      fs.existsSync(`public/images/${uploadFileName}`) &&
+      fs.unlinkSync(`public/images/${uploadFileName}`); // delete old file
+    }
     addToSession(req, 'msg', 'validation_error')
     res.status(422).redirect(domain + 'create');
     return;
   };
-  const uploadFileName = req.file?.filename; //req.file egzistuoja tik jei yra failas
+
+  if (req.fileValidationError) {
+    addToSession(req, 'msg', 'file_error');
+    res.status(422).redirect(domain + 'create ');
+    return;
+  };
+
 
   const book = { id, title, author, year, genre, isbn, pages, cover: uploadFileName };
   let data = fs.readFileSync('./data/books.json', 'utf8');
@@ -272,6 +297,7 @@ app.post('/update/:id', (req, res) => {
   const oldBook = books.find(book => book.id === id);
   // page existe
   if (!oldBook) {
+    console.log('testuotojai patenka čia')
     show404(res);
     return;
   };
@@ -281,7 +307,11 @@ app.post('/update/:id', (req, res) => {
     res.status(422).redirect(domain + 'edit/' + id);
     return;
   };
-
+  if (req.fileValidationError) {
+    addToSession(req, 'msg', 'file_error');
+    res.status(422).redirect(domain + 'edit/' + id);
+    return;
+  }
   const uploadFileName = req.file?.filename;
   let cover;
   if (!uploadFileName) {
@@ -289,15 +319,14 @@ app.post('/update/:id', (req, res) => {
   } else {
     cover = uploadFileName;
   }
-
-  if (req.body.delete_cover) {
+  if (req.body.delete_cover && !uploadFileName) {
     cover = undefined; // delete cover entry
   }
- 
   if (req.body.delete_cover || uploadFileName) {
-    fs.unlinkSync(`public/images/${oldBook.cover}`); // delete old file
+    //if exists, delete old file
+    fs.existsSync(`public/images/${oldBook.cover}`) &&
+      fs.unlinkSync(`public/images/${oldBook.cover}`); // delete old file
   }
- 
 
   const newBook = { id: oldBook.id, title, author, year, genre, isbn, pages, cover };
   books = books.map(book => book.id === id ? newBook : book);
@@ -317,6 +346,10 @@ app.post('/destroy/:id', (req, res) => {
   if (!oldBook) {
     show404(res);
     return;
+  }
+  if (oldBook.cover) {
+    fs.existsSync(`public/images/${oldBook.cover}`) &&
+    fs.unlinkSync(`public/images/${oldBook.cover}`); // delete uploaded file
   }
   books = books.filter(book => book.id !== id);
   books = JSON.stringify(books);
