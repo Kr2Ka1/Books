@@ -2,10 +2,12 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const handlebars = require('handlebars');
+const md5 = require('md5');
 const multer = require('multer');
 const fs = require('node:fs');
 const { v4: uuidv4 } = require('uuid');
 const { log } = require('node:console');
+const { message } = require('laravel-mix/src/Log');
 const app = express();
 
 handlebars.registerHelper('isdefined', function (value) {
@@ -34,11 +36,29 @@ const messages = {
   edit_success: { msg: 'Knyga sėkmingai atnaujinta!', type: 'success' },
   delete_success: { msg: 'Knyga sėkmingai ištrinta!', type: 'success' },
   validation_error: { msg: 'Užpildykite visus laukus!', type: 'danger' },
-  file_error: { msg: 'Netinkamas paveikslėlio formatas. Palaikomi formatai: jpeg, png', type: 'danger' }
+  file_error: { msg: 'Netinkamas paveikslėlio formatas. Palaikomi formatai: jpeg, png', type: 'danger' },
+  login_error: { msg: 'Neteisingi prisijungimo duomenys!', type: 'danger' },
+  login_ok: { msg: 'Sėkmingai prisijungta!', type: 'success' },
+  logout_ok: { msg: 'Sėkmingai atsijungta!', type: 'success' }
 };
 
 
 // MIDDLEWARE
+
+
+const auth = (req, res, next) => {
+  if (req.url === '/login' || req.url === '/') {
+    return next();
+  }
+  if (!req.session.data.user) {
+    res.status(401).redirect(domain + 'login');
+    return;
+  }
+
+  next();
+}
+
+
 
 const upload = multer({
   storage,
@@ -83,11 +103,11 @@ const oldDataManager = (req, res, next) => {
 }
 
 app.use(express.static('public'));
-// app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(upload.single('cover'));
-
 app.use(sessionManager);
+app.use(auth);
 app.use(oldDataManager);
 
 
@@ -166,7 +186,9 @@ app.get('/', (req, res) => {
     domain,
     books,
     message: getMessages(req),
-    sortBy: { [sortBy]: true }
+    sortBy: { [sortBy]: true },
+    user: req.session.data?.user || 'Svetimas (Alien)',
+    loggedIn: req.session.data?.user ? true : false  
   };
 
   const html = template(data);
@@ -182,7 +204,8 @@ app.get('/create', (req, res) => {
     pageTitle: 'Nauja knyga',
     domain: domain,
     message: getMessages(req),
-    oldData: req.session.data.oldData || {}
+    oldData: req.session.data.oldData || {},
+    user: req.session.data?.user || 'Svetimas (Alien)' 
   };
   const html = template(data);
   res.send(html);
@@ -212,6 +235,8 @@ app.get('/delete/:id', (req, res) => {
 });
 
 
+
+
 app.get('/edit/:id', (req, res) => {
   const file = top + fs.readFileSync('./html/edit.html', 'utf8') + bottom;
   const template = handlebars.compile(file);
@@ -229,7 +254,8 @@ app.get('/edit/:id', (req, res) => {
     domain: domain,
     ...book,
     message: getMessages(req),
-    oldData: req.session.data.oldData || {}
+    oldData: req.session.data.oldData || {},
+    user: req.session.data?.user || 'Svetimas (Alien)' 
   };
   const html = template(data);
   res.send(html);
@@ -250,7 +276,8 @@ app.get('/show/:id', (req, res) => {
   const data = {
     pageTitle: `Rodyti knygą "${book.title}"`,
     domain: domain,
-    ...book
+    ...book,
+    user: req.session.data?.user || 'Svetimas (Alien)' 
   };
   const html = template(data);
   res.send(html);
@@ -265,7 +292,7 @@ app.post('/store', (req, res) => {
 
     if (uploadFileName) {
       fs.existsSync(`public/images/${uploadFileName}`) &&
-      fs.unlinkSync(`public/images/${uploadFileName}`); // delete old file
+        fs.unlinkSync(`public/images/${uploadFileName}`); // delete old file
     }
     addToSession(req, 'msg', 'validation_error')
     res.status(422).redirect(domain + 'create');
@@ -349,7 +376,7 @@ app.post('/destroy/:id', (req, res) => {
   }
   if (oldBook.cover) {
     fs.existsSync(`public/images/${oldBook.cover}`) &&
-    fs.unlinkSync(`public/images/${oldBook.cover}`); // delete uploaded file
+      fs.unlinkSync(`public/images/${oldBook.cover}`); // delete uploaded file
   }
   books = books.filter(book => book.id !== id);
   books = JSON.stringify(books);
@@ -357,6 +384,49 @@ app.post('/destroy/:id', (req, res) => {
   addToSession(req, 'msg', 'delete_success')
   res.status(302).redirect(domain);
 });
+
+
+app.get('/login', (req, res) => {
+  const file = top + fs.readFileSync('./html/login.html', 'utf8') + bottom;
+  const template = handlebars.compile(file);
+
+  const data = {
+    pageTitle: 'Prisijungimas',
+    domain: domain,
+    nomenu: true,
+    message: getMessages(req),
+    user: req.session.data?.user || 'Svetimas (Alien)' 
+  };
+  const html = template(data);
+  res.send(html);
+});
+
+
+app.post('/login', (req, res) => {
+
+  if (req.query?.logout) {
+    addToSession(req, 'user', undefined);
+    addToSession(req, 'msg', 'logoutok');
+    res.status(302).redirect(domain);
+    return;
+  }
+  let users = fs.readFileSync('./data/users.json', 'utf8');
+  users = JSON.parse(users);
+  const { name, psw } = req.body;
+  const pswhash = md5(psw);
+
+  const user = users.find(user => user.name === name && user.psw === pswhash);
+  if (!user) {
+    addToSession(req, 'msg', 'login_error');
+    res.status(401).redirect(domain + 'login');
+    return
+  }
+  addToSession(req, 'user', user.name);
+  addToSession(req, 'msg', 'login_ok');
+  res.status(302).redirect(domain);
+});
+
+
 
 
 // const Handlebars = require("handlebars");
