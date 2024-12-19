@@ -406,7 +406,7 @@ app.post('/login', (req, res) => {
 
   if (req.query?.logout) {
     addToSession(req, 'user', undefined);
-    addToSession(req, 'msg', 'logoutok');
+    addToSession(req, 'msg', 'logout_ok');
     res.status(302).redirect(domain);
     return;
   }
